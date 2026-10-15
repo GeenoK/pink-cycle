@@ -4,7 +4,10 @@
   'use strict';
 
   var cfg = window.APP_CONFIG || {};
-  var configured = /^https:\/\//.test(cfg.SUPABASE_URL || '') && (cfg.SUPABASE_KEY || '').length > 20;
+  // 容错：自动去掉网址里多余的 /rest/v1、结尾斜杠和空格
+  cfg.SUPABASE_URL = String(cfg.SUPABASE_URL || '').trim().replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+  cfg.SUPABASE_KEY = String(cfg.SUPABASE_KEY || '').trim();
+  var configured = /^https:\/\/[^\/]+\.supabase\.co$/.test(cfg.SUPABASE_URL) && cfg.SUPABASE_KEY.length > 20;
 
   var sb = null;          // Supabase 客户端
   var user = null;        // 当前登录的用户
@@ -245,8 +248,16 @@
     err.textContent = ''; btn.disabled = true;
     try {
       var r = await sb.auth.signInWithPassword({ email: $('email').value.trim(), password: $('password').value });
-      if (r.error) err.textContent = navigator.onLine === false ? '现在没有网络。' : '登录失败：邮箱或密码不对。';
-    } catch (x) { err.textContent = '登录失败，请检查网络后重试。'; }
+      if (r.error) {
+        var m = (r.error.message || '') + '';
+        var hint = '';
+        if (navigator.onLine === false) hint = '现在没有网络。';
+        else if (/invalid login credentials/i.test(m)) hint = '邮箱或密码不对（或这个账号不存在）。';
+        else if (/not confirmed/i.test(m)) hint = '这个账号的邮箱还没有确认，请在 Supabase 的 Users 里确认，或重建账号并勾选 Auto Confirm User。';
+        else if (/api key|apikey/i.test(m)) hint = '密钥不对，请检查 config.js 里的 SUPABASE_KEY。';
+        err.textContent = '登录失败：' + (hint ? hint + ' ' : '') + '（' + m + '）';
+      }
+    } catch (x) { err.textContent = '登录失败：连不上服务器，请检查网络和 config.js 里的 SUPABASE_URL。（' + (x && x.message ? x.message : x) + '）'; }
     btn.disabled = false;
   }
   function handleSession(session) {
