@@ -1,6 +1,6 @@
 {
-  "name": "经期记录",
-  "short_name": "经期记录",
+  "name": "Pink Cycle",
+  "short_name": "Pink Cycle",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
