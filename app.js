@@ -236,7 +236,7 @@
     busy = false;
   }
   async function onLogout() {
-    try { localStorage.removeItem(cacheKey()); } catch (e) {}   // 退出时清掉本机缓存
+    try { localStorage.removeItem(cacheKey()); localStorage.removeItem('pt-last-user'); } catch (e) {}   // 退出时清掉本机缓存
     $('moreDlg').close();
     await sb.auth.signOut();
   }
@@ -260,13 +260,17 @@
     } catch (x) { err.textContent = '登录失败：连不上服务器，请检查网络和 config.js 里的 SUPABASE_URL。（' + (x && x.message ? x.message : x) + '）'; }
     btn.disabled = false;
   }
+  var resolved = false, offlineFallback = false;
   function handleSession(session) {
+    resolved = true;
     if (session && session.user) {
-      if (user && user.id === session.user.id) return;   // 同一个人，不用重复加载
+      if (user && user.id === session.user.id && !offlineFallback) return;   // 同一个人，不用重复加载
+      offlineFallback = false;
       user = session.user;
+      try { localStorage.setItem('pt-last-user', user.id); } catch (e) {}
       records = []; loadCache(); render(); showView('main'); refresh();
     } else {
-      user = null; records = [];
+      user = null; records = []; offlineFallback = false;
       $('password').value = '';
       showView('auth');
     }
@@ -283,6 +287,32 @@
       showView('setup'); return;
     }
     sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_KEY);
+
+    // 先显示“正在打开”，避免登录状态检查卡住时整页空白
+    $('setupMsg').textContent = '正在打开…';
+    showView('setup');
+
+    // 6 秒还没拿到登录状态（多半是网络不通，或 Supabase 项目被暂停了）：
+    // 有上次的本机缓存就先显示缓存，否则显示登录页并说明原因
+    setTimeout(function () {
+      if (resolved) return;
+      var last = null;
+      try { last = localStorage.getItem('pt-last-user'); } catch (e) {}
+      if (last) {
+        user = { id: last, email: '' };
+        offlineFallback = true;
+        loadCache(); render(); showView('main'); setStatus('offline');
+      } else {
+        showView('auth');
+        $('loginErr').textContent = '连不上服务器。请检查网络；如果网络正常，可能是 Supabase 项目被暂停了，需要到后台点 Restore project。';
+      }
+    }, 6000);
+
+    window.addEventListener('error', function (ev) {
+      if (!$('viewMain').hidden || !$('viewAuth').hidden) return;
+      $('setupMsg').textContent = '页面出错了：' + (ev && ev.message ? ev.message : '未知错误') + '。请刷新页面重试。';
+      showView('setup');
+    });
 
     $('loginForm').addEventListener('submit', onLogin);
     $('toggle').addEventListener('click', onToggle);
@@ -307,7 +337,7 @@
 
     // 登录状态变化时切换界面（回调里不直接调数据库，放到下一个时间片再处理）
     sb.auth.onAuthStateChange(function (event, session) { setTimeout(function () { handleSession(session); }, 0); });
-    sb.auth.getSession().then(function (r) { handleSession(r.data.session); });
+    sb.auth.getSession().then(function (r) { handleSession(r.data.session); }).catch(function () { /* 超时兜底会处理 */ });
   }
 
   if ('serviceWorker' in navigator) {
